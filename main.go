@@ -18,10 +18,13 @@ func main() {
 		log.Fatalf("error loading env variables: %s", err.Error())
 	}
 
-	fmt.Println("Listening on port :8000")
+	ip := viper.GetString("ws.ip")
+	portIP := viper.GetString("ws.port_ip")
+
+	fmt.Println("Listening on port :" + portIP)
 	// we mount our single handler on port localhost:8000 to handle all
 	// requests
-	log.Panic(http.ListenAndServe("192.168.1.194:8000", http.HandlerFunc(wsHandler)))
+	log.Panic(http.ListenAndServe(ip+":"+portIP, http.HandlerFunc(wsHandler)))
 }
 
 func initConfig() error {
