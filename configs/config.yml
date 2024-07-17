@@ -2,9 +2,9 @@ db:
   username: "postgres"
   host: "localhost"
   port: "5432"
-  dbname: "gfc"
+  dbname: "gfc_belgorod"
   sslmode: "disable"
 
 ws:
-  ip: "10.252.1.2"
+  ip: "192.168.1.194"
   port_ip: "8000"

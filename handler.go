@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -76,6 +77,101 @@ func NewPostgresDB(cfg Config) (*sqlx.DB, error) {
 }
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
+	// обновляем соединение
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("failed to upgrade connection: ", err)
+		return
+	}
+	defer conn.Close()
+
+	db, err := NewPostgresDB(Config{
+		Host:     viper.GetString("db.host"),
+		Port:     viper.GetString("db.port"),
+		Username: viper.GetString("db.username"),
+		DBName:   viper.GetString("db.dbname"),
+		SSLMode:  viper.GetString("db.sslmode"),
+		Password: os.Getenv("DB_PASSWORD"),
+	})
+
+	if err != nil {
+		log.Fatalf("failed to initialize db: %s", err.Error())
+	}
+
+	var tr bool = true
+	var tx *sqlx.Tx
+	var query string
+	values := []interface{}{}
+
+	numFields := 22 // the number of fields you are inserting
+	kol_ab := 0
+	kol_tr := 0
+
+	for {
+		kol_ab++
+		kol_tr++
+
+		// читаем сообщения с цикле
+		_, p, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("total received: ", kol_ab-1)
+			log.Println("failed to read message: ", err)
+			if !tr {
+				tx.MustExec(query, values...)
+				tx.Commit()
+			}
+			return
+		}
+
+		if tr {
+			tx = db.MustBegin()
+			query = "INSERT INTO abonents (id, ls_reg, uuid, ncounter, ls_gas, id_ais, database_name, typecounter, fio, adress, id_turg, id_rajon, id_filial, legal_org, verification_date, ncounter_real, equipment_uuid, working, date_remote, date_amount, amount, update_date) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)"
+			//очищаем срез интерфейсов
+			values = values[:0]
+			tr = false
+			kol_tr = 0
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(string(p))
+		if err != nil {
+			log.Println("failed to decode: ", err)
+			return
+		}
+		//log.Printf("received from client: %s", string(p))
+		//log.Printf("received from client: %s", decoded)
+		var au AbonentStr
+		err = json.Unmarshal(decoded, &au)
+		if err != nil {
+			log.Println("failed to unmarshal: ", err)
+			return
+		}
+
+		values = append(values, au.Id, au.Ls_reg, au.Uuid, au.Ncounter, au.Ls_gas, au.Id_ais, au.Database_name, au.Typecounter, au.Fio, au.Adress, au.Id_turg, au.Id_rajon, 0, au.Legal_org, time.Now(), au.Ncounter_real, au.Equipment_uuid, au.Working, time.Now(), time.Now(), 0, au.Update_date)
+
+		if kol_tr > 0 {
+			n := kol_tr * numFields
+
+			query += `,(`
+			for j := 0; j < 22; j++ {
+				query += `$` + strconv.Itoa(n+j+1) + `,`
+			}
+			query = query[:len(query)-1] + `)`
+		}
+
+		if kol_ab%5000 == 0 {
+			log.Println("received from client: ", kol_ab)
+		}
+
+		if kol_ab%100 == 0 {
+			tx.MustExec(query, values...)
+			tx.Commit()
+			tr = true
+			kol_tr = 0
+		}
+	}
+}
+
+func wsHandlerOld(w http.ResponseWriter, r *http.Request) {
 	// upgrade the connection
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
