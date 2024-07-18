@@ -7,7 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -61,6 +64,23 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+// Функция проверяет наличие папки log в текущим каталоге и создает её при отсутствии
+// Возвращает полный путь
+func DirExist() string {
+	var here = os.Args[0]
+	here1 := filepath.Dir(here)
+	/*if err != nil {
+		fmt.Printf("Неправильный путь: %s\n", err)
+	}*/
+	dir := here1 + string(os.PathSeparator) + "log"
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err := os.Mkdir(dir, 0755)
+		if err != nil {
+			return here
+		}
+	}
+	return dir
+}
 func NewPostgresDB(cfg Config) (*sqlx.DB, error) {
 	db, err := sqlx.Open("postgres", fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.Username, cfg.DBName, cfg.Password, cfg.SSLMode))
@@ -74,6 +94,20 @@ func NewPostgresDB(cfg Config) (*sqlx.DB, error) {
 	}
 
 	return db, nil
+}
+
+func readPsswd() string {
+	var dbpass string = ""
+	var dbps64 = os.Getenv("DB_PASSWORD")
+	if len(strings.TrimSpace(dbps64)) != 0 {
+		dbpssw, err := base64.StdEncoding.DecodeString(dbps64)
+		dbpass = string(dbpssw)
+		if err != nil {
+			log.Fatalf("ERROR decode password: %s", err.Error())
+			return ""
+		}
+	}
+	return dbpass
 }
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -91,12 +125,26 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		Username: viper.GetString("db.username"),
 		DBName:   viper.GetString("db.dbname"),
 		SSLMode:  viper.GetString("db.sslmode"),
-		Password: os.Getenv("DB_PASSWORD"),
+		Password: readPsswd(),
 	})
 
 	if err != nil {
 		log.Fatalf("failed to initialize db: %s", err.Error())
 	}
+
+	// текущие дата время для формирования имени log-файла
+	t := time.Now()
+	LOGFILE := path.Join(DirExist(), t.Format("20060102150405")+".log")
+	f, err := os.OpenFile(LOGFILE, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer f.Close()
+
+	Info := log.New(f, "", log.LstdFlags)
+	Info.Println("New import session")
+	Info.SetFlags(log.Ltime)
 
 	var tr bool = true
 	var tx *sqlx.Tx
@@ -116,6 +164,8 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Println("total received: ", kol_ab-1)
 			log.Println("failed to read message: ", err)
+			Info.SetFlags(log.LstdFlags)
+			Info.Println("End of import. All: " + strconv.Itoa(kol_ab-1))
 			if !tr {
 				tx.MustExec(query, values...)
 				tx.Commit()
@@ -146,6 +196,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		Info.Println(strconv.Itoa(kol_ab) + " " + au.Equipment_uuid)
 		values = append(values, au.Id, au.Ls_reg, au.Uuid, au.Ncounter, au.Ls_gas, au.Id_ais, au.Database_name, au.Typecounter, au.Fio, au.Adress, au.Id_turg, au.Id_rajon, 0, au.Legal_org, time.Now(), au.Ncounter_real, au.Equipment_uuid, au.Working, time.Now(), time.Now(), 0, au.Update_date)
 
 		if kol_tr > 0 {
@@ -171,7 +222,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func wsHandlerOld(w http.ResponseWriter, r *http.Request) {
+/*func wsHandlerOld(w http.ResponseWriter, r *http.Request) {
 	// upgrade the connection
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -207,17 +258,7 @@ func wsHandlerOld(w http.ResponseWriter, r *http.Request) {
 			log.Println("failed to read message: ", err)
 			return
 		}
-		/*
-			var msg string
 
-			err = conn.ReadJSON(&msg)
-			if err != nil {
-				log.Println("failed to read message: ", err)
-				return
-			}
-			var au AbonentStr
-			err = json.Unmarshal([]byte(msg), &au)
-		*/
 		decoded, err := base64.StdEncoding.DecodeString(string(p))
 		if err != nil {
 			log.Println("failed to decode: ", err)
@@ -238,10 +279,7 @@ func wsHandlerOld(w http.ResponseWriter, r *http.Request) {
 
 		tx.MustExec("INSERT INTO abonents (id, ls_reg, uuid, ncounter, ls_gas, id_ais, database_name, typecounter, fio, adress, id_turg, id_rajon, id_filial, legal_org, verification_date, ncounter_real, equipment_uuid, working, date_remote, date_amount, amount, update_date) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)",
 			au.Id, au.Ls_reg, au.Uuid, au.Ncounter, au.Ls_gas, au.Id_ais, au.Database_name, au.Typecounter, au.Fio, au.Adress, au.Id_turg, au.Id_rajon, 0, au.Legal_org, time.Now(), au.Ncounter_real, au.Equipment_uuid, au.Working, time.Now(), time.Now(), 0, au.Update_date)
-		/*if err := conn.WriteMessage(messageType, p); err != nil {
-			log.Println("failed to write message: ", err)
-			return
-		}*/
+
 		//conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		if kol_ab%5000 == 0 {
@@ -249,4 +287,4 @@ func wsHandlerOld(w http.ResponseWriter, r *http.Request) {
 		}
 		tx.Commit()
 	}
-}
+}*/
