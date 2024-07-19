@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -62,6 +63,30 @@ type AbonentStr struct {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+}
+
+func NullableString(s string) sql.NullString {
+	return sql.NullString{s, s != "_"}
+}
+
+func NullableTime(s string) sql.NullTime {
+	if s != "_" {
+		valuetime, err := time.Parse(time.RFC3339, s)
+		if err == nil {
+			return sql.NullTime{valuetime, true}
+		}
+	}
+	return sql.NullTime{}
+}
+
+func NullableInt64(s string) sql.NullInt64 {
+	if s != "_" {
+		value, err := strconv.ParseInt(s, 10, 64)
+		if err == nil {
+			return sql.NullInt64{value, true}
+		}
+	}
+	return sql.NullInt64{}
 }
 
 // Функция проверяет наличие папки log в текущим каталоге и создает её при отсутствии
@@ -197,7 +222,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		Info.Println(strconv.Itoa(kol_ab) + " " + au.Equipment_uuid)
-		values = append(values, au.Id, au.Ls_reg, au.Uuid, au.Ncounter, au.Ls_gas, au.Id_ais, au.Database_name, au.Typecounter, au.Fio, au.Adress, au.Id_turg, au.Id_rajon, 0, au.Legal_org, time.Now(), au.Ncounter_real, au.Equipment_uuid, au.Working, time.Now(), time.Now(), 0, au.Update_date)
+		values = append(values, NullableInt64(au.Id), NullableString(au.Ls_reg), NullableString(au.Uuid), NullableString(au.Ncounter), NullableString(au.Ls_gas), NullableString(au.Id_ais), NullableString(au.Database_name), NullableString(au.Typecounter), NullableString(au.Fio), NullableString(au.Adress), NullableInt64(au.Id_turg), NullableInt64(au.Id_rajon), NullableInt64(au.Id_filial), NullableInt64(au.Legal_org), NullableTime(au.Verification_date), NullableString(au.Ncounter_real), NullableString(au.Equipment_uuid), NullableInt64(au.Working), NullableTime(au.Date_remote), NullableTime(au.Date_amount), NullableInt64(au.Amount), NullableTime(au.Update_date))
 
 		if kol_tr > 0 {
 			n := kol_tr * numFields
